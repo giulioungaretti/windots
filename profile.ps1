@@ -7,6 +7,12 @@ if ($host.Name -eq 'ConsoleHost') {
 	function Test-IsAutomatedSession {
 		try {
 			$currentProcess = Get-Process -Id $PID -ErrorAction Stop
+			
+			# Check if parent exists
+			if ($null -eq $currentProcess.Parent) {
+				return $false
+			}
+			
 			$parentProcess = Get-Process -Id $currentProcess.Parent.Id -ErrorAction Stop
 			$parentName = $parentProcess.ProcessName
 			
@@ -18,9 +24,15 @@ if ($host.Name -eq 'ConsoleHost') {
 			
 			# Additional check: if parent is node, check its command line for copilot indicators
 			if ($parentName -eq 'node') {
-				$parentCommandLine = $parentProcess.CommandLine
-				if ($parentCommandLine -match 'copilot|github.*cli') {
-					return $true
+				try {
+					$parentCommandLine = $parentProcess.CommandLine
+					if ($null -ne $parentCommandLine -and $parentCommandLine -match 'copilot|github.*cli') {
+						return $true
+					}
+				}
+				catch {
+					# CommandLine may be inaccessible due to security restrictions
+					# Continue with basic name check
 				}
 			}
 			
@@ -42,7 +54,8 @@ if ($host.Name -eq 'ConsoleHost') {
 		}
 		
 		# Exclude sensitive commands (those containing passwords, secrets, etc.)
-		if ($command -match 'password|secret|apikey|token') {
+		# Use case-insensitive matching to catch all variations
+		if ($command -imatch 'password|secret|apikey|token') {
 			return $false
 		}
 		
