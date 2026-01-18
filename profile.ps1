@@ -32,8 +32,8 @@ if ($host.Name -eq 'ConsoleHost') {
 	Import-Module PSFzf
 	#replace 'Ctrl+t' and 'Ctrl+r' with your preferred bindings:
 	Set-PsFzfOption -PSReadlineChordProvider 'Ctrl+t' -PSReadlineChordReverseHistory 'Ctrl+r'
-
-
+	# git autcompletion source
+	Import-Module git-completion
 
 	# colors that work in light and dark backgrounds
 	Set-PSReadLineOption -Colors @{
