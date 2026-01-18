@@ -3,7 +3,7 @@ if ($host.Name -eq 'ConsoleHost') {
 	Set-PSReadLineOption -EditMode vi
 
 
-	
+
 	# Tell PSReadLine we want to run a script when mode changes
 	Set-PSReadLineOption -ViModeIndicator Script
 
@@ -27,7 +27,12 @@ if ($host.Name -eq 'ConsoleHost') {
 		}
 	}
 
-	oh-my-posh init pwsh --config C:\Users\gungaretti\sources\repos\PS\robbyrussell.json | Invoke-Expression
+	oh-my-posh init pwsh --config C:\Users\gungaretti\source\repos\PS\robbyrussell.json | Invoke-Expression
+	# Emit OSC 9;9 so Windows Terminal knows the current directory
+	$omp_hook = { $loc = Get-Location if ($loc.Provider.Name -eq "FileSystem") { "$([char]27)]9;9;`"$($loc.ProviderPath)`"$([char]27)\" } }
+	if ( $omp_hook ) {
+		# do nothing but force the variable to be used and squiggles in the editor to go away 🤮
+	}
 	Remove-PSReadlineKeyHandler 'Ctrl+r'
 	Import-Module PSFzf
 	#replace 'Ctrl+t' and 'Ctrl+r' with your preferred bindings:
