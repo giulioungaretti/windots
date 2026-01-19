@@ -28,17 +28,16 @@ if ($host.Name -eq 'ConsoleHost') {
 	}
 
 	oh-my-posh init pwsh --config C:\Users\gungaretti\source\repos\PS\robbyrussell.json | Invoke-Expression
-	# Emit OSC 9;9 so Windows Terminal knows the current directory
-	$omp_hook = { $loc = Get-Location if ($loc.Provider.Name -eq "FileSystem") { "$([char]27)]9;9;`"$($loc.ProviderPath)`"$([char]27)\" } }
-	if ( $omp_hook ) {
-		# do nothing but force the variable to be used and squiggles in the editor to go away 🤮
-	}
+
 	Remove-PSReadlineKeyHandler 'Ctrl+r'
 	Import-Module PSFzf
 	#replace 'Ctrl+t' and 'Ctrl+r' with your preferred bindings:
 	Set-PsFzfOption -PSReadlineChordProvider 'Ctrl+t' -PSReadlineChordReverseHistory 'Ctrl+r'
 	# git autcompletion source
 	Import-Module git-completion
+
+	# Tab completion as menu
+	Set-PSReadLineKeyHandler -Chord Tab -Function MenuComplete
 
 	# colors that work in light and dark backgrounds
 	Set-PSReadLineOption -Colors @{
