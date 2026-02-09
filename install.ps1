@@ -1,7 +1,7 @@
 winget install JanDeDobbeleer.OhMyPosh --source winget
 winget install junegunn.fzf 
-Install-Module PSFzf -Scope CurrentUser
-Install-Module git-completion -Scope CurrentUser
+Install-Module PSFzf -Scope CurrentUser  -Force -AllowClobber 
+Install-Module git-completion -Scope CurrentUser -Force -AllowClobber 
 
 $repoProfilePath = Resolve-Path (Join-Path $PSScriptRoot 'profile.ps1')
 $profileDir = Split-Path $PROFILE -Parent
