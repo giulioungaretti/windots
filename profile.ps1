@@ -31,8 +31,6 @@ if ($host.Name -eq 'ConsoleHost') {
 		}
 	}
 
-	oh-my-posh init pwsh --config (Join-Path $PSScriptRoot 'robbyrussell.json') | Invoke-Expression
-
 	Remove-PSReadlineKeyHandler 'Ctrl+r'
 
 	# Lazy-load PSFzf on first use of its chords (saves ~0.5s at startup). The
@@ -61,26 +59,60 @@ if ($host.Name -eq 'ConsoleHost') {
 		Number             = "$([char]0x1b)[38;5;242m"# ANSI 256-color gray
 	}
 
-	# Lazy-load git-completion the first time we step into a Git repo (it's the
-	# single most expensive import, ~1.7s). Wrap oh-my-posh's prompt: run it
-	# first so $? / $LASTEXITCODE stay intact for the status segment, then do a
-	# cheap upward .git walk (no git.exe) and stop checking once loaded.
-	$global:__ompPrompt = (Get-Item function:prompt).ScriptBlock
-	$global:__gitCompletionLoaded = $false
+	# --- Deferred (async) load of oh-my-posh ----------------------------------
+	# oh-my-posh's init costs ~900ms. Instead of paying that before the first
+	# prompt, show an instant placeholder prompt and load oh-my-posh on the
+	# first idle tick -- after the shell is already interactive -- then
+	# re-render. Technique:
+	# https://matt.kotsenas.com/posts/pwsh-profiling-async-startup/
+	$global:__ompConfig = Join-Path $PSScriptRoot 'robbyrussell.json'
+
+	# Instant placeholder prompt, shown only until oh-my-posh finishes loading.
 	function global:prompt {
-		$out = & $global:__ompPrompt
-		if (-not $global:__gitCompletionLoaded) {
-			$dir = $PWD.ProviderPath
-			while ($dir) {
-				if (Test-Path -LiteralPath (Join-Path $dir '.git')) {
-					Import-Module git-completion -ErrorAction SilentlyContinue
-					$global:__gitCompletionLoaded = $true
-					break
+		"$([char]0x1b)[38;5;242m➜$([char]0x1b)[0m  $($executionContext.SessionState.Path.CurrentLocation) "
+	}
+
+	# Slow work to run once the shell is idle. Loaded as a -Global module so it
+	# survives the idle event's job scope and overrides the placeholder prompt.
+	[System.Collections.Queue]$global:__initQueue = [System.Collections.Queue]@(
+		{
+			oh-my-posh init pwsh --config $global:__ompConfig | Invoke-Expression
+
+			# Wrap oh-my-posh's freshly-defined prompt so git-completion (the most
+			# expensive import, ~1.7s) loads lazily the first time we're inside a
+			# Git repo. Capture omp's prompt first, then export our wrapper.
+			$global:__ompPrompt = (Get-Item function:prompt).ScriptBlock
+			$global:__gitCompletionLoaded = $false
+			New-Module -Name git-completion-lazy-prompt -ScriptBlock {
+				function prompt {
+					$out = & $global:__ompPrompt
+					if (-not $global:__gitCompletionLoaded) {
+						$dir = $PWD.ProviderPath
+						while ($dir) {
+							if (Test-Path -LiteralPath (Join-Path $dir '.git')) {
+								Import-Module git-completion -ErrorAction SilentlyContinue
+								$global:__gitCompletionLoaded = $true
+								break
+							}
+							$dir = Split-Path $dir -Parent
+						}
+					}
+					$out
 				}
-				$dir = Split-Path $dir -Parent
-			}
+			} | Import-Module -Global
 		}
-		$out
+	)
+
+	Register-EngineEvent -SourceIdentifier PowerShell.OnIdle -SupportEvent -Action {
+		if ($global:__initQueue.Count -gt 0) {
+			& $global:__initQueue.Dequeue()
+		}
+		else {
+			Unregister-Event -SubscriptionId $EventSubscriber.SubscriptionId -Force
+			Remove-Variable -Name '__initQueue' -Scope Global -Force
+			# Re-render now that the real prompt is loaded, so it shows immediately.
+			[Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
+		}
 	}
 }
 
