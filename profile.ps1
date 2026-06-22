@@ -68,8 +68,16 @@ if ($host.Name -eq 'ConsoleHost') {
 	$global:__ompConfig = Join-Path $PSScriptRoot 'robbyrussell.json'
 
 	# Instant placeholder prompt, shown only until oh-my-posh finishes loading.
+	# Pixel-identical to the robbyrussell theme's first prompt: green arrow
+	# (#98C379), then the cyan (#56B6C2) folder-style path (~ at home, else the
+	# leaf folder), then a trailing space. No git/status segment -- those only
+	# matter after a command, by which point the real prompt has taken over.
 	function global:prompt {
-		"$([char]0x1b)[38;5;242m➜$([char]0x1b)[0m  $($executionContext.SessionState.Path.CurrentLocation) "
+		$e = [char]0x1b
+		$p = $executionContext.SessionState.Path.CurrentLocation.ProviderPath
+		if ($p -eq $HOME) { $leaf = '~' }
+		else { $leaf = Split-Path $p -Leaf; if (-not $leaf) { $leaf = $p } }
+		"$e[38;2;152;195;121m➜$e[0m  $e[38;2;86;182;194m$leaf$e[0m "
 	}
 
 	# On the first idle tick (shell already interactive) load oh-my-posh, then
