@@ -31,21 +31,7 @@ if ($host.Name -eq 'ConsoleHost') {
 		}
 	}
 
-	# oh-my-posh: dot-source a cached copy of its init script instead of spawning
-	# the (WindowsApps-aliased, ~370ms) binary every launch. Regenerate the cache
-	# only when the binary or theme changes -- filesystem stat only, no spawn.
-	$ompTheme = Join-Path $PSScriptRoot 'robbyrussell.json'
-	$ompCache = Join-Path $PSScriptRoot '.omp-init.ps1'
-	$ompExe   = (Get-Command oh-my-posh -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
-	$ompFresh = $ompExe -and (Test-Path $ompCache) -and
-		((Get-Item $ompCache).LastWriteTimeUtc -ge (Get-Item $ompExe).LastWriteTimeUtc) -and
-		((Get-Item $ompCache).LastWriteTimeUtc -ge (Get-Item $ompTheme).LastWriteTimeUtc)
-	if (-not $ompFresh) {
-		oh-my-posh init pwsh --config $ompTheme --print | Out-File -Encoding utf8 $ompCache
-	}
-	. $ompCache
-	# The cached script bakes in a fixed POSH_SESSION_ID; give each shell a fresh one.
-	$env:POSH_SESSION_ID = [guid]::NewGuid().ToString()
+	oh-my-posh init pwsh --config (Join-Path $PSScriptRoot 'robbyrussell.json') | Invoke-Expression
 
 	Remove-PSReadlineKeyHandler 'Ctrl+r'
 
