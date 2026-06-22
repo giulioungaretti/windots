@@ -59,38 +59,51 @@ if ($host.Name -eq 'ConsoleHost') {
 		Number             = "$([char]0x1b)[38;5;242m"# ANSI 256-color gray
 	}
 
-	# --- Deferred (async) load of oh-my-posh ----------------------------------
-	# oh-my-posh's init costs ~900ms. Instead of paying that before the first
-	# prompt, show an instant placeholder prompt and load oh-my-posh on the
-	# first idle tick -- after the shell is already interactive -- then
-	# re-render. Technique:
-	# https://matt.kotsenas.com/posts/pwsh-profiling-async-startup/
-	$global:__ompConfig = Join-Path $PSScriptRoot 'robbyrussell.json'
+	# --- Lazy load of oh-my-posh (git repo OR sustained idle) -----------------
+	# oh-my-posh's init costs ~900ms, but the placeholder prompt below is
+	# pixel-identical to its base prompt -- so for plain (non-git) directories
+	# there is nothing to gain by paying that cost. We stay on the instant
+	# placeholder and only swap in the real oh-my-posh when it actually adds
+	# something: when you enter a Git repo (for the branch segment), OR after
+	# the shell has sat idle at the prompt for a few seconds (so a long-lived
+	# shell eventually gains full fidelity incl. the status segment for free).
+	# Idea: https://matt.kotsenas.com/posts/pwsh-profiling-async-startup/
+	$global:__ompConfig      = Join-Path $PSScriptRoot 'robbyrussell.json'
+	$global:__ompLoad        = $false                              # load request flag
+	$global:__ompIdleSeconds = 3                                   # idle delay before auto-load
+	$global:__ompIdleSw      = [System.Diagnostics.Stopwatch]::StartNew()
 
-	# Instant placeholder prompt, shown only until oh-my-posh finishes loading.
-	# Pixel-identical to the robbyrussell theme's first prompt: green arrow
+	# Instant placeholder prompt, shown until oh-my-posh takes over.
+	# Pixel-identical to the robbyrussell theme's base prompt: green arrow
 	# (#98C379), then the cyan (#56B6C2) folder-style path (~ at home, else the
-	# leaf folder), then a trailing space. No git/status segment -- those only
-	# matter after a command, by which point the real prompt has taken over.
+	# leaf folder), then a trailing space. While it renders it (a) requests the
+	# real prompt the moment we're inside a Git repo via a cheap upward .git
+	# walk (no git.exe), and (b) restarts the idle timer so the auto-load only
+	# fires after genuine inactivity.
 	function global:prompt {
 		$e = [char]0x1b
 		$p = $executionContext.SessionState.Path.CurrentLocation.ProviderPath
 		if ($p -eq $HOME) { $leaf = '~' }
 		else { $leaf = Split-Path $p -Leaf; if (-not $leaf) { $leaf = $p } }
+
+		if (-not $global:__ompLoad) {
+			$dir = $p
+			while ($dir) {
+				if (Test-Path -LiteralPath (Join-Path $dir '.git')) { $global:__ompLoad = $true; break }
+				$dir = Split-Path $dir -Parent
+			}
+		}
+
+		$global:__ompIdleSw.Restart()
 		"$e[38;2;152;195;121m➜$e[0m  $e[38;2;86;182;194m$leaf$e[0m "
 	}
 
-	# On the first idle tick (shell already interactive) load oh-my-posh, then
-	# re-render once. -MaxTriggerCount 1 auto-unregisters so this runs exactly
-	# once -- a single placeholder -> real transition, no redundant re-render.
-	# The work is loaded as a -Global module so it survives the event's job
-	# scope and overrides the placeholder prompt.
-	Register-EngineEvent -SourceIdentifier PowerShell.OnIdle -SupportEvent -MaxTriggerCount 1 -Action {
+	# The actual (slow) oh-my-posh init, plus a wrapper that lazily imports
+	# git-completion (~1.7s) the first time we're inside a Git repo. Loaded as
+	# -Global modules so they survive the idle event's job scope.
+	$global:__ompInit = {
 		oh-my-posh init pwsh --config $global:__ompConfig | Invoke-Expression
 
-		# Wrap oh-my-posh's freshly-defined prompt so git-completion (the most
-		# expensive import, ~1.7s) loads lazily the first time we're inside a
-		# Git repo. Capture omp's prompt first, then export our wrapper.
 		$global:__ompPrompt = (Get-Item function:prompt).ScriptBlock
 		$global:__gitCompletionLoaded = $false
 		New-Module -Name git-completion-lazy-prompt -ScriptBlock {
@@ -110,9 +123,17 @@ if ($host.Name -eq 'ConsoleHost') {
 				$out
 			}
 		} | Import-Module -Global
+	}
 
-		# Re-render now that the real prompt is loaded, so it shows immediately.
-		[Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
+	# Each idle tick (~every 0.3s) is cheap: just check the two triggers. When
+	# one fires, load oh-my-posh once, re-render, self-unregister, and clean up.
+	Register-EngineEvent -SourceIdentifier PowerShell.OnIdle -SupportEvent -Action {
+		if ($global:__ompLoad -or $global:__ompIdleSw.Elapsed.TotalSeconds -ge $global:__ompIdleSeconds) {
+			& $global:__ompInit
+			Unregister-Event -SubscriptionId $EventSubscriber.SubscriptionId -Force
+			[Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
+			Remove-Variable -Name '__ompInit','__ompLoad','__ompIdleSeconds','__ompIdleSw' -Scope Global -Force -ErrorAction SilentlyContinue
+		}
 	}
 }
 
