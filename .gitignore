@@ -1,3 +1,6 @@
 # PowerShell modules are populated locally by install.ps1 (Save-Module) and kept
 # off OneDrive for fast startup. Not committed.
 Modules/
+
+# Generated oh-my-posh init cache (machine/version specific).
+.omp-init.ps1

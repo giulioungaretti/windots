@@ -31,12 +31,35 @@ if ($host.Name -eq 'ConsoleHost') {
 		}
 	}
 
-	oh-my-posh init pwsh --config (Join-Path $PSScriptRoot 'robbyrussell.json') | Invoke-Expression
+	# oh-my-posh: dot-source a cached copy of its init script instead of spawning
+	# the (WindowsApps-aliased, ~370ms) binary every launch. Regenerate the cache
+	# only when the binary or theme changes -- filesystem stat only, no spawn.
+	$ompTheme = Join-Path $PSScriptRoot 'robbyrussell.json'
+	$ompCache = Join-Path $PSScriptRoot '.omp-init.ps1'
+	$ompExe   = (Get-Command oh-my-posh -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+	$ompFresh = $ompExe -and (Test-Path $ompCache) -and
+		((Get-Item $ompCache).LastWriteTimeUtc -ge (Get-Item $ompExe).LastWriteTimeUtc) -and
+		((Get-Item $ompCache).LastWriteTimeUtc -ge (Get-Item $ompTheme).LastWriteTimeUtc)
+	if (-not $ompFresh) {
+		oh-my-posh init pwsh --config $ompTheme --print | Out-File -Encoding utf8 $ompCache
+	}
+	. $ompCache
+	# The cached script bakes in a fixed POSH_SESSION_ID; give each shell a fresh one.
+	$env:POSH_SESSION_ID = [guid]::NewGuid().ToString()
 
 	Remove-PSReadlineKeyHandler 'Ctrl+r'
-	Import-Module PSFzf
-	#replace 'Ctrl+t' and 'Ctrl+r' with your preferred bindings:
-	Set-PsFzfOption -PSReadlineChordProvider 'Ctrl+t' -PSReadlineChordReverseHistory 'Ctrl+r'
+
+	# Lazy-load PSFzf on first use of its chords (saves ~0.5s at startup). The
+	# first Ctrl+t / Ctrl+r imports it, wires the real bindings, then runs.
+	$global:__psfzfLoaded = $false
+	function global:Initialize-PSFzfLazy {
+		if ($global:__psfzfLoaded) { return }
+		Import-Module PSFzf
+		Set-PsFzfOption -PSReadlineChordProvider 'Ctrl+t' -PSReadlineChordReverseHistory 'Ctrl+r'
+		$global:__psfzfLoaded = $true
+	}
+	Set-PSReadLineKeyHandler -Chord 'Ctrl+t' -ScriptBlock { Initialize-PSFzfLazy; Invoke-FzfPsReadlineHandlerProvider }
+	Set-PSReadLineKeyHandler -Chord 'Ctrl+r' -ScriptBlock { Initialize-PSFzfLazy; Invoke-FzfPsReadlineHandlerHistory }
 
 	# Tab completion as menu
 	Set-PSReadLineKeyHandler -Chord Tab -Function MenuComplete
@@ -75,4 +98,4 @@ if ($host.Name -eq 'ConsoleHost') {
 	}
 }
 
-New-Alias codi code-insiders
+Set-Alias codi code-insiders
