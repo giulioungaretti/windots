@@ -72,47 +72,39 @@ if ($host.Name -eq 'ConsoleHost') {
 		"$([char]0x1b)[38;5;242m➜$([char]0x1b)[0m  $($executionContext.SessionState.Path.CurrentLocation) "
 	}
 
-	# Slow work to run once the shell is idle. Loaded as a -Global module so it
-	# survives the idle event's job scope and overrides the placeholder prompt.
-	[System.Collections.Queue]$global:__initQueue = [System.Collections.Queue]@(
-		{
-			oh-my-posh init pwsh --config $global:__ompConfig | Invoke-Expression
+	# On the first idle tick (shell already interactive) load oh-my-posh, then
+	# re-render once. -MaxTriggerCount 1 auto-unregisters so this runs exactly
+	# once -- a single placeholder -> real transition, no redundant re-render.
+	# The work is loaded as a -Global module so it survives the event's job
+	# scope and overrides the placeholder prompt.
+	Register-EngineEvent -SourceIdentifier PowerShell.OnIdle -SupportEvent -MaxTriggerCount 1 -Action {
+		oh-my-posh init pwsh --config $global:__ompConfig | Invoke-Expression
 
-			# Wrap oh-my-posh's freshly-defined prompt so git-completion (the most
-			# expensive import, ~1.7s) loads lazily the first time we're inside a
-			# Git repo. Capture omp's prompt first, then export our wrapper.
-			$global:__ompPrompt = (Get-Item function:prompt).ScriptBlock
-			$global:__gitCompletionLoaded = $false
-			New-Module -Name git-completion-lazy-prompt -ScriptBlock {
-				function prompt {
-					$out = & $global:__ompPrompt
-					if (-not $global:__gitCompletionLoaded) {
-						$dir = $PWD.ProviderPath
-						while ($dir) {
-							if (Test-Path -LiteralPath (Join-Path $dir '.git')) {
-								Import-Module git-completion -ErrorAction SilentlyContinue
-								$global:__gitCompletionLoaded = $true
-								break
-							}
-							$dir = Split-Path $dir -Parent
+		# Wrap oh-my-posh's freshly-defined prompt so git-completion (the most
+		# expensive import, ~1.7s) loads lazily the first time we're inside a
+		# Git repo. Capture omp's prompt first, then export our wrapper.
+		$global:__ompPrompt = (Get-Item function:prompt).ScriptBlock
+		$global:__gitCompletionLoaded = $false
+		New-Module -Name git-completion-lazy-prompt -ScriptBlock {
+			function prompt {
+				$out = & $global:__ompPrompt
+				if (-not $global:__gitCompletionLoaded) {
+					$dir = $PWD.ProviderPath
+					while ($dir) {
+						if (Test-Path -LiteralPath (Join-Path $dir '.git')) {
+							Import-Module git-completion -ErrorAction SilentlyContinue
+							$global:__gitCompletionLoaded = $true
+							break
 						}
+						$dir = Split-Path $dir -Parent
 					}
-					$out
 				}
-			} | Import-Module -Global
-		}
-	)
+				$out
+			}
+		} | Import-Module -Global
 
-	Register-EngineEvent -SourceIdentifier PowerShell.OnIdle -SupportEvent -Action {
-		if ($global:__initQueue.Count -gt 0) {
-			& $global:__initQueue.Dequeue()
-		}
-		else {
-			Unregister-Event -SubscriptionId $EventSubscriber.SubscriptionId -Force
-			Remove-Variable -Name '__initQueue' -Scope Global -Force
-			# Re-render now that the real prompt is loaded, so it shows immediately.
-			[Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
-		}
+		# Re-render now that the real prompt is loaded, so it shows immediately.
+		[Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
 	}
 }
 
