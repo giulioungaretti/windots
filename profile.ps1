@@ -6,6 +6,72 @@ if ($host.Name -eq 'ConsoleHost') {
 	Import-Module PSReadLine
 	Set-PSReadLineOption -EditMode vi
 
+	# Function to detect if running under automation (GitHub Copilot, etc.)
+	# This prevents automation tools from polluting command history
+	function Test-IsAutomatedSession {
+		try {
+			$currentProcess = Get-Process -Id $PID -ErrorAction Stop
+			
+			# Check if parent exists
+			if ($null -eq $currentProcess.Parent) {
+				return $false
+			}
+			
+			$parentProcess = Get-Process -Id $currentProcess.Parent.Id -ErrorAction Stop
+			$parentName = $parentProcess.ProcessName
+			
+			# Check for known automation parent processes
+			# winpty-agent: Used by GitHub Copilot CLI and similar tools
+			# conhost: Sometimes used by automation without a proper terminal
+			# Note: We don't exclude 'Code' (VSCode) to maintain shell integration
+			$automationProcesses = @('winpty-agent', 'node')
+			
+			# Additional check: if parent is node, check its command line for copilot indicators
+			if ($parentName -eq 'node') {
+				try {
+					$parentCommandLine = $parentProcess.CommandLine
+					if ($null -ne $parentCommandLine -and $parentCommandLine -match 'copilot|github.*cli') {
+						return $true
+					}
+				}
+				catch {
+					# CommandLine may be inaccessible due to security restrictions
+					# Continue with basic name check
+				}
+			}
+			
+			return $automationProcesses -contains $parentName
+		}
+		catch {
+			# If we can't determine, assume it's a human session (safer default)
+			return $false
+		}
+	}
+
+	# Configure history handler to exclude commands from automated sessions
+	Set-PSReadLineOption -AddToHistoryHandler {
+		param($command)
+		
+		# Always exclude commands that start with space (common convention)
+		if ($command -match '^\s') {
+			return $false
+		}
+		
+		# Exclude sensitive commands (those containing passwords, secrets, etc.)
+		# Use case-insensitive matching to catch all variations
+		if ($command -imatch 'password|secret|apikey|token') {
+			return $false
+		}
+		
+		# Exclude commands from automated sessions (Copilot, etc.)
+		if (Test-IsAutomatedSession) {
+			return $false
+		}
+		
+		# Add everything else to history
+		return $true
+	}
+
 
 
 	# Tell PSReadLine we want to run a script when mode changes
