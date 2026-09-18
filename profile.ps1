@@ -1,3 +1,8 @@
+$repoBin = Join-Path $PSScriptRoot 'bin'
+if (($env:PATH -split [System.IO.Path]::PathSeparator) -notcontains $repoBin) {
+	$env:PATH = $repoBin + [System.IO.Path]::PathSeparator + $env:PATH
+}
+
 if ($host.Name -eq 'ConsoleHost') {
 	# Use the modules vendored in this repo (off OneDrive, version-controlled)
 	# so startup doesn't pay the OneDrive placeholder-hydration cost.
