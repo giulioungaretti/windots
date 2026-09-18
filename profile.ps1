@@ -59,45 +59,34 @@ if ($host.Name -eq 'ConsoleHost') {
 		Number             = "$([char]0x1b)[38;5;242m"# ANSI 256-color gray
 	}
 
-	# --- Lazy load of oh-my-posh (git repo OR sustained idle) -----------------
-	# oh-my-posh's init costs ~900ms, but the placeholder prompt below is
-	# pixel-identical to its base prompt -- so for plain (non-git) directories
-	# there is nothing to gain by paying that cost. We stay on the instant
-	# placeholder and only swap in the real oh-my-posh when it actually adds
-	# something: when you enter a Git repo (for the branch segment), OR after
-	# the shell has sat idle at the prompt for a few seconds (so a long-lived
-	# shell eventually gains full fidelity incl. the status segment for free).
-	# Idea: https://matt.kotsenas.com/posts/pwsh-profiling-async-startup/
-	$global:__ompConfig      = Join-Path $PSScriptRoot 'robbyrussell.json'
-	$global:__ompLoad        = $false                              # load request flag
-	$global:__ompIdleSeconds = 3                                   # idle delay before auto-load
-	$global:__ompIdleSw      = [System.Diagnostics.Stopwatch]::StartNew()
+	# Feedback provider (PS 7.4+) colors. The default FeedbackAction is bright
+	# white (\e[97m) -- the suggested-command list is then washed out / unreadable
+	# on light terminal backgrounds. Use the theme's accent blue (#5FAAE8) which
+	# has contrast on both light and dark backgrounds.
+	if ($PSStyle -and $PSStyle.Formatting.PSObject.Properties['FeedbackAction']) {
+		$PSStyle.Formatting.FeedbackAction = "$([char]0x1b)[38;2;95;170;232m"
+	}
 
-	# Instant placeholder prompt, shown until oh-my-posh takes over.
-	# Pixel-identical to the robbyrussell theme's base prompt: green arrow
-	# (#98C379), then the cyan (#56B6C2) folder-style path (~ at home, else the
-	# leaf folder), then a trailing space. While it renders it (a) requests the
-	# real prompt the moment we're inside a Git repo via a cheap upward .git
-	# walk (no git.exe), and (b) restarts the idle timer so the auto-load only
-	# fires after genuine inactivity.
+	# --- oh-my-posh DISABLED (favoring a fast shell; use the `git` CLI for status)
+	# The lazy oh-my-posh loader still cost noticeable startup/idle time, so it is
+	# turned off for now. We keep only the instant placeholder prompt below (green
+	# arrow + cyan folder), which is pixel-identical to the robbyrussell base
+	# prompt -- just without the git/status segments. To re-enable, restore the
+	# prompt's .git/idle detection and uncomment the init + OnIdle block below.
+	# Idea: https://matt.kotsenas.com/posts/pwsh-profiling-async-startup/
+
+	# Fast, self-contained prompt: green arrow (#98C379) + cyan (#56B6C2)
+	# folder-style path (~ at home, else the leaf folder) + a trailing space.
 	function global:prompt {
 		$e = [char]0x1b
 		$p = $executionContext.SessionState.Path.CurrentLocation.ProviderPath
 		if ($p -eq $HOME) { $leaf = '~' }
 		else { $leaf = Split-Path $p -Leaf; if (-not $leaf) { $leaf = $p } }
 
-		if (-not $global:__ompLoad) {
-			$dir = $p
-			while ($dir) {
-				if (Test-Path -LiteralPath (Join-Path $dir '.git')) { $global:__ompLoad = $true; break }
-				$dir = Split-Path $dir -Parent
-			}
-		}
-
-		$global:__ompIdleSw.Restart()
 		"$e[38;2;152;195;121m➜$e[0m  $e[38;2;86;182;194m$leaf$e[0m "
 	}
 
+	<#  DISABLED -- oh-my-posh lazy init + git-completion + OnIdle auto-load.
 	# The actual (slow) oh-my-posh init, plus a wrapper that lazily imports
 	# git-completion (~1.7s) the first time we're inside a Git repo. Loaded as
 	# -Global modules so they survive the idle event's job scope.
@@ -135,6 +124,7 @@ if ($host.Name -eq 'ConsoleHost') {
 			Remove-Variable -Name '__ompInit','__ompLoad','__ompIdleSeconds','__ompIdleSw' -Scope Global -Force -ErrorAction SilentlyContinue
 		}
 	}
+	#>
 }
 
 Set-Alias codi code-insiders
